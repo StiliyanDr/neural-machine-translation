@@ -219,7 +219,6 @@ class ModelTrainer:
                                        trial,
                                        iteration):
         if (utils.divides(self.__test_interval, iteration)):
-            model.eval()
             current_perplexity = perplexity_of(
                 model,
                 validation_samples,
@@ -280,7 +279,6 @@ class ModelTrainer:
                                        validation_samples,
                                        best_perplexity,
                                        params):
-        model.eval()
         current_perplexity = perplexity_of(model,
                                            validation_samples,
                                            params.batch_size)
@@ -339,7 +337,10 @@ def perplexity_of(model, samples, batch_size):
     the model was trained.
     :returns: a float - the perplexity of the model on the given
     samples.
+
+    Note that after the call the model is in evaluation mode.
     """
+    model.eval()
     H = 0.
     total_target_words = 0
 
