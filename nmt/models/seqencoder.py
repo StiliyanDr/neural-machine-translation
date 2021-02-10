@@ -156,3 +156,11 @@ class SequenceEncoder(torch.nn.Module):
         bidirectional.
         """
         return self.__is_bidirectional
+
+    @property
+    def num_layers(self):
+        """
+        :returns: an int - the number of RNN layers (in a single
+        direction).
+        """
+        return self.__num_layers
