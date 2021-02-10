@@ -2,6 +2,8 @@ import copy
 
 import torch
 
+from nmt.models import utils
+
 
 class NMTModel(torch.nn.Module):
     """
@@ -32,6 +34,7 @@ class NMTModel(torch.nn.Module):
                  decoder,
                  attention,
                  target_words,
+                 meta_tokens,
                  do_initial_binding=True,
                  preprojection_nonlinearity=None):
         """
@@ -42,6 +45,8 @@ class NMTModel(torch.nn.Module):
         :param target_words: a mapping with words (strs) for keys and
         indexes (ints) for values - the dictionary of the language being
         translated to.
+        :param meta_tokens: the MetaTokens instance used when extracting
+        the dictionary.
         :param do_initial_binding: a boolean value indicating whether
         the final state of the encoder should be fed into the decoder.
         Defaults to `True`. Note that this is only possible if the
@@ -80,6 +85,7 @@ class NMTModel(torch.nn.Module):
             len(target_words)
         )
         self.__target_words = copy.deepcopy(target_words)
+        self.__meta_tokens = copy.deepcopy(meta_tokens)
 
     def __set_initial_binding_option(self,
                                      do_initial_binding,
@@ -95,9 +101,46 @@ class NMTModel(torch.nn.Module):
         self.__do_initial_binding = do_initial_binding
 
     def forward(self, source, target):
-        return 0
+        """
+        :param source: a sequence of sentences - each sentence being
+        a sequence of tokens/words (strs); the sentences being
+        translated. These sentences are assumed to be sorted by length
+        in decreasing order.
+        :param target: a sequence of sentences - each sentence being
+        a sequence of tokens/words (strs) which starts and ends with
+        the start and end meta tokens, respectively; the translation
+        sentences.
+        :returns: a float - the cross-entropy loss computed on the
+        batch of sentences.
+
+        Note that the two sequences are assumed to have the same length,
+        each sentence in `target` corresponds to a sentence in `source`.
+        """
+        assert len(source) == len(target)
+        source_contexts, final_encoder_context = \
+            self.__encoder(source, sentences_are_sorted=True)
+        target_contexts, _ = self.__decode(
+            sentences=[s[:-1] for s in target],
+            final_encoder_context=final_encoder_context
+        )
+        attention_vectors = \
+            self.__attention(source_contexts, target_contexts)
+        final_contexts = \
+            self.__final_contexts(target_contexts, attention_vectors)
+        projections = self.__words_projection(final_contexts)
+        target_words = self.__target_words_for(target)
+
+        return self.__cross_entropy_loss(projections, target_words)
 
     def __decode(self, sentences, final_encoder_context):
+        """
+        Non-public utility method.
+
+        Given the target sentences for the decoder and the final encoder
+        state, this method feeds the sentences into the decoder,
+        optionally providing it with the final encoder state (if the
+        model was set up with initial binding).
+        """
         initial_context = None
 
         if (self.__do_initial_binding):
@@ -154,6 +197,64 @@ class NMTModel(torch.nn.Module):
             final_layer_contexts[0, :, :] + final_layer_contexts[1, :, :]
             if (self.__encoder.is_bidirectional)
             else final_layer_contexts[0, :, :]
+        )
+
+    def __final_contexts(self, target_contexts, attention_vectors):
+        """
+        Non-public utility method.
+
+        Given the target context vectors and their attention vectors,
+        for each target sentence and each context in it, this method
+        concatenates the context and attention vectors, optionally
+        transforms the concatenated vectors (if the model was set up
+        like so) and returns them.
+
+        The shapes change from:
+        (max_sent_len, batch_size, hidden_size),
+        (max_sent_len, batch_size, source_size)
+        to:
+        (max_sent_len * batch_size, hidden_size + source_size)
+        """
+        final_contexts = \
+            torch.cat((target_contexts, attention_vectors), dim=2)
+        final_contexts = final_contexts.flatten(0, 1)
+
+        return (
+            self.__nonlinearity(self.__preprojection_transformation(
+                final_contexts
+            ))
+            if (self.__transform_contexts_before_projection())
+            else final_contexts
+        )
+
+    def __transform_contexts_before_projection(self):
+        return self.__preprojection_transformation is not None
+
+    def __target_words_for(self, sentences):
+        """
+        Non-public utility method.
+
+        Given the target sentences, this method returns a tensor of
+        shape ((max_sentence_len - 1) * batch_size) containing the
+        indexes of the target words in each sentence. First come the
+        first target words in each sentence, then the second and so on.
+        """
+        indexes = utils.prepare_batch(
+            sentences=[s[1:] for s in sentences],
+            word_indexes=self.__target_words,
+            meta_tokens=self.__meta_tokens,
+            device=utils.device_of(self)
+        )
+
+        return indexes.flatten(0, 1)
+
+    def __cross_entropy_loss(self, projections, target_words):
+        return torch.nn.functional.cross_entropy(
+            projections,
+            target_words,
+            ignore_index=self.__target_words[
+                self.__meta_tokens.padding
+            ]
         )
 
     def translate_sentence(self, sentence, limit=None):
