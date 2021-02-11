@@ -186,7 +186,7 @@ def create_encoder(params, source_dictionary, meta_tokens):
         meta_tokens,
         embedding_size=encoder_params.getint("embedding_size"),
         hidden_size=encoder_params.getint("hidden_size"),
-        is_bidirectional=encoder_params.getbool("is_bidirectional"),
+        is_bidirectional=encoder_params.getboolean("is_bidirectional"),
         num_layers=encoder_params.getint("num_layers"),
         dropout=encoder_params.getfloat("rnn_dropout")
     )
@@ -210,7 +210,7 @@ def create_attention(params, encoder, decoder):
         encoder.context_size,
         decoder.context_size,
         attention_size=attention_params.getint("size"),
-        is_multiplicative=attention_params.getbool("is_multiplicative")
+        is_multiplicative=attention_params.getboolean("is_multiplicative")
     )
 
 
@@ -232,7 +232,7 @@ def do_create_model(params,
         attention,
         target_dictionary,
         meta_tokens,
-        do_initial_binding=model_params.getbool("do_initial_binding"),
+        do_initial_binding=model_params.getboolean("do_initial_binding"),
         preprojection_nonlinearity=nonlinearity
     )
 
@@ -340,7 +340,7 @@ def write_error(message):
 
 
 if (__name__ == "__main__"):
-    if (len(sys.argv) < 2):
+    if (len(sys.argv) >= 2):
         params, meta_tokens, device = load_parameters("parameters.ini")
         command_name = sys.argv[1]
 
