@@ -73,7 +73,7 @@ class NMTModel(torch.nn.Module):
         self.__set_initial_binding_option(do_initial_binding,
                                           encoder,
                                           decoder)
-        final_context_size = encoder.hidden_size + decoder.hidden_size
+        final_context_size = encoder.context_size + decoder.context_size
         self.__preprojection_transformation = (
             None
             if (preprojection_nonlinearity is None)
@@ -281,6 +281,9 @@ class NMTModel(torch.nn.Module):
         `TRANSLATION_LIMIT`.
         :returns: a list of tokens - the translation.
         """
+        if (not s):
+            return []
+
         with torch.no_grad():
             return self.__do_translate_sentence(
                 s,
@@ -290,7 +293,7 @@ class NMTModel(torch.nn.Module):
                 )
             )
 
-    def _do_translate_sentence(self, s, limit):
+    def __do_translate_sentence(self, s, limit):
         sentence_contexts, decoder_context = self.__encode_sentence(s)
         translation = []
         word = self.__meta_tokens.start
