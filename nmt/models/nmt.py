@@ -3,6 +3,7 @@ import copy
 import torch
 
 from nmt.models import utils
+from nmt.utils import default_if_none
 
 
 class NMTModel(torch.nn.Module):
@@ -84,8 +85,7 @@ class NMTModel(torch.nn.Module):
             final_context_size,
             len(target_words)
         )
-        self.__target_words = copy.deepcopy(target_words)
-        self.__meta_tokens = copy.deepcopy(meta_tokens)
+        self.__set_words(target_words, meta_tokens)
 
     def __set_initial_binding_option(self,
                                      do_initial_binding,
@@ -99,6 +99,11 @@ class NMTModel(torch.nn.Module):
             )
 
         self.__do_initial_binding = do_initial_binding
+
+    def __set_words(self, target_words, meta_tokens):
+        self.__target_words = copy.deepcopy(target_words)
+        self.__index_to_word = utils.flip(target_words)
+        self.__meta_tokens = copy.deepcopy(meta_tokens)
 
     def forward(self, source, target):
         """
@@ -141,6 +146,12 @@ class NMTModel(torch.nn.Module):
         optionally providing it with the final encoder state (if the
         model was set up with initial binding).
         """
+        return self.__decoder(
+            sentences,
+            self.__initial_decoder_context(final_encoder_context)
+        )
+
+    def __initial_decoder_context(self, final_encoder_context):
         initial_context = None
 
         if (self.__do_initial_binding):
@@ -152,7 +163,7 @@ class NMTModel(torch.nn.Module):
             )
             initial_context = (h_n, c_n)
 
-        return self.__decoder(sentences, initial_context)
+        return initial_context
 
     def __reshaped_for_decoder(self, final_contexts):
         """
@@ -257,8 +268,93 @@ class NMTModel(torch.nn.Module):
             ]
         )
 
-    def translate_sentence(self, sentence, limit=None):
-        return []
+    def translate_sentence(self, s, limit=None):
+        """
+        :param s: a sequence of tokens (strs) - the sentence to
+        translate.
+        :param limit: an unsigned int - a limit for the translation's
+        length in tokens. If omitted or `None`, defaults to
+        `TRANSLATION_LIMIT`.
+        :returns: a list of tokens - the translation.
+        """
+        with torch.no_grad():
+            return self.__do_translate_sentence(
+                s,
+                default_if_none(
+                    limit,
+                    self.__class__.__TRANSLATION_LIMIT
+                )
+            )
+
+    def _do_translate_sentence(self, s, limit):
+        sentence_contexts, decoder_context = self.__encode_sentence(s)
+        translation = []
+        word = self.__meta_tokens.start
+
+        while (len(translation) < limit):
+            probabilities, decoder_context = self.__distribution_after(
+                word,
+                decoder_context,
+                sentence_contexts
+            )
+            word = self.__most_probable_word(probabilities)
+
+            if (word != self.__meta_tokens.end):
+                translation.append(word)
+            else:
+                break
+
+        return translation
+
+    def __encode_sentence(self, s):
+        """
+        Non-public utility method.
+
+        Computes the source contexts of shape
+        (sentence_length, 1, num_directions * hidden_size)
+
+        and the initial decoder context - a pair of tensors of shape
+        (decoder_num_layers, 1, decoder_hidden_size). If initial binding
+        is not used, the initial context is `None`, that is, the decoder
+        will use tensors with zeros instead.
+        """
+        sentence_contexts, final_encoder_context = \
+            self.__encoder([s], sentences_are_sorted=True)
+        decoder_context = self.__initial_decoder_context(
+            final_encoder_context
+        )
+
+        return (sentence_contexts, decoder_context)
+
+    def __distribution_after(self,
+                             word,
+                             decoder_context,
+                             sentence_contexts):
+        """
+        Non-public utility method.
+
+        Given the source sentence contexts, the current state of the
+        decoder (which captures the translated sentence so far) and
+        the newly generated word, this method updates the decoder state,
+        computes the distribution for the updated translation and
+        returns the distribution and decoder state.
+        """
+        _, decoder_context = self.__decoder([[word]], decoder_context)
+        h_n, _ = decoder_context
+        target_context = h_n[-1, :, :].unsqueeze(0)
+        attention_vector = self.__attention(sentence_contexts,
+                                            target_context)
+        final_context = \
+            self.__final_contexts(target_context,
+                                  attention_vector)
+        projection = self.__words_projection(final_context)
+        distribution = utils.softmax(projection[0, :])
+
+        return (distribution, decoder_context)
+
+    def __most_probable_word(self, probabilities):
+        index = torch.argmax(probabilities).item()
+        return self.__index_to_word[index]
 
     def save(self, path):
         """
