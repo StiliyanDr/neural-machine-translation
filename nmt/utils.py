@@ -60,3 +60,9 @@ def divides(a, b):
     assert a != 0
 
     return b % a == 0
+
+
+def default_if_none(value, default):
+    return (value
+            if (value is not None)
+            else default)

@@ -4,6 +4,8 @@ from typing import NamedTuple
 
 import nltk
 
+from nmt.utils import default_if_none
+
 
 class MetaTokens(NamedTuple):
     """
@@ -144,12 +146,6 @@ def extract_dictionary_from(corpus,
     all_words = itertools.chain(words, meta_tokens)
 
     return {w: i for i, w in enumerate(all_words)}
-
-
-def default_if_none(value, default):
-    return (value
-            if (value is not None)
-            else default)
 
 
 def surround_with_meta_tokens(sentences, meta_tokens):
