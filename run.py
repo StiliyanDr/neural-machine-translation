@@ -9,7 +9,7 @@ from nmt import (
     training as tr,
     utils,
 )
-from nmt.model import NMTModel
+from nmt import models as nmt
 
 
 def load_parameters(path):
@@ -73,12 +73,14 @@ def prepare_data(params, meta_tokens):
                     serialisation_paths["dictionaries"])
 
 
-def train_model(params, device, is_extra_trained):
+def train_model(params, meta_tokens, device, is_extra_trained):
     """
     (Extra) trains a model.
 
     :param params: a ConfigParser - the params read from the
     'parameters.ini' file.
+    :param meta_tokens: a MetaTokens instance created from the
+    parameters file.
     :param device: the torch.device to use during training.
     :param is_extra_trained: a boolean value indicating whether the
     model has already been trained (so that it gets picked up from disk
@@ -86,7 +88,10 @@ def train_model(params, device, is_extra_trained):
     """
     train_samples, validation_samples = load_samples(params)
     model, optimizer, best_perplexity, learning_rate = \
-        set_up_model_and_optimizer(params, device, is_extra_trained)
+        set_up_model_and_optimizer(params,
+                                   meta_tokens,
+                                   device,
+                                   is_extra_trained)
     trainer, training_params = set_up_trainer_and_its_params(
         params,
         learning_rate
@@ -109,9 +114,12 @@ def load_samples(params):
 
 
 def set_up_model_and_optimizer(params,
+                               meta_tokens,
                                device,
                                is_extra_trained):
-    model = NMTModel().to(device)
+    model = create_model(params,
+                         meta_tokens,
+                         device)
     train_params = params["TRAIN PARAMS"]
     learning_rate = train_params.getfloat("learning_rate")
     optimizer = torch.optim.Adam(
@@ -139,6 +147,96 @@ def set_up_model_and_optimizer(params,
     return (model, optimizer, best_perplexity, learning_rate)
 
 
+def create_model(params,
+                 meta_tokens,
+                 device):
+    """
+    Creates a NMTModel instance based on the specified configuration.
+
+    :param params: a ConfigParser - the params read from the
+    'parameters.ini' file. This file contains the various model configs.
+    :param meta_tokens: a MetaTokens instance created from the
+    parameters file.
+    :param device: the created model's device.
+    :returns: an instance of NMTModel.
+    """
+    source_dictionary, target_dictionary = load_dictionaries(params)
+    encoder = create_encoder(params, source_dictionary, meta_tokens)
+    decoder = create_decoder(params, target_dictionary, meta_tokens)
+    attention = create_attention(params, encoder, decoder)
+    model = do_create_model(params,
+                            encoder,
+                            decoder,
+                            attention,
+                            target_dictionary,
+                            meta_tokens)
+    return model.to(device)
+
+
+def load_dictionaries(params):
+    return utils.deserialise_from(
+        params["SERIALISATION"]["dictionaries"]
+    )
+
+
+def create_encoder(params, source_dictionary, meta_tokens):
+    encoder_params = params["ENCODER"]
+    return nmt.Encoder(
+        source_dictionary,
+        meta_tokens,
+        embedding_size=encoder_params.getint("embedding_size"),
+        hidden_size=encoder_params.getint("hidden_size"),
+        is_bidirectional=encoder_params.getbool("is_bidirectional"),
+        num_layers=encoder_params.getint("num_layers"),
+        dropout=encoder_params.getfloat("rnn_dropout")
+    )
+
+
+def create_decoder(params, target_dictionary, meta_tokens):
+    decoder_params = params["DECODER"]
+    return nmt.Decoder(
+        target_dictionary,
+        meta_tokens,
+        embedding_size=decoder_params.getint("embedding_size"),
+        hidden_size=decoder_params.getint("hidden_size"),
+        num_layers=decoder_params.getint("num_layers"),
+        dropout=decoder_params.getfloat("rnn_dropout")
+    )
+
+
+def create_attention(params, encoder, decoder):
+    attention_params = params["ATTENTION"]
+    return nmt.Attention(
+        encoder.context_size,
+        decoder.context_size,
+        attention_size=attention_params.getint("size"),
+        is_multiplicative=attention_params.getbool("is_multiplicative")
+    )
+
+
+def do_create_model(params,
+                    encoder,
+                    decoder,
+                    attention,
+                    target_dictionary,
+                    meta_tokens):
+    model_params = params["MODEL"]
+    name = model_params["preprojection_nonlinearity"]
+    nonlinearity = (getattr(torch, name)
+                    if (name != "None")
+                    else None)
+
+    return nmt.NMTModel(
+        encoder,
+        decoder,
+        attention,
+        target_dictionary,
+        meta_tokens,
+        do_initial_binding=model_params.getbool("do_initial_binding"),
+        preprojection_nonlinearity=nonlinearity
+    )
+
+
 def set_up_trainer_and_its_params(params, learning_rate):
     train_params = params["TRAIN PARAMS"]
     paths = params["SERIALISATION"]
@@ -162,12 +260,14 @@ def set_up_trainer_and_its_params(params, learning_rate):
     return (trainer, training_params)
 
 
-def print_perplexity(params, device, samples_name):
+def print_perplexity(params, meta_tokens, device, samples_name):
     """
     Prints the perplexity of a model on a given set of samples.
 
     :param params: a ConfigParser - the params read from the
     'parameters.ini' file.
+    :param meta_tokens: a MetaTokens instance created from the
+    parameters file.
     :param device: the torch.device to use.
     :param samples_name: a str - the samples on which to compute the
     perplexity. Must be either of: 'train', 'test', 'validation'.
@@ -178,7 +278,7 @@ def print_perplexity(params, device, samples_name):
         paths[f"{samples_name}_samples"]
     )
 
-    model = NMTModel().to(device)
+    model = create_model(params, meta_tokens, device)
     model.load(paths["model"])
 
     p = tr.perplexity_of(
@@ -190,7 +290,11 @@ def print_perplexity(params, device, samples_name):
     print("Model perplexity:", p)
 
 
-def translate(sentences_path, translation_path, device, params):
+def translate(sentences_path,
+              translation_path,
+              meta_tokens,
+              device,
+              params):
     """
     Translates a sequence of sentences in a file and stores the
     translations into another file.
@@ -199,12 +303,14 @@ def translate(sentences_path, translation_path, device, params):
     sentences to translate.
     :param translation_path: a str - the path of the file where to write
     the translations.
+    :param meta_tokens: a MetaTokens instance created from the
+    parameters file.
     :param device: the torch.device to use.
     :param params: a ConfigParser - the params read from the
     'parameters.ini' file.
     """
     sentences = dp.read_corpus(sentences_path)
-    model = NMTModel().to(device)
+    model = create_model(params, meta_tokens, device)
     model.load(params["SERIALISATION"]["model"])
     model.eval()
 
@@ -243,12 +349,14 @@ if (__name__ == "__main__"):
         elif (command_name == "train" or command_name == "extratrain"):
             train_model(
                 params,
+                meta_tokens,
                 device,
                 is_extra_trained=command_name.startswith("extra")
             )
         elif (command_name == "perplexity"):
             print_perplexity(
                 params,
+                meta_tokens,
                 device,
                 samples_name=("test"
                               if (len(sys.argv) == 2)
@@ -256,7 +364,11 @@ if (__name__ == "__main__"):
             )
         elif (command_name == "translate"):
             if (len(sys.argv) == 4):
-                translate(sys.argv[2], sys.argv[3], device, params)
+                translate(sys.argv[2],
+                          sys.argv[3],
+                          meta_tokens,
+                          device,
+                          params)
             else:
                 write_error("Expected paths to file with sentences "
                             "and file where to store translations!")
