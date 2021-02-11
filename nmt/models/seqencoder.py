@@ -55,7 +55,9 @@ class SequenceEncoder(torch.nn.Module):
             hidden_size=hidden_size,
             bidirectional=is_bidirectional,
             num_layers=num_layers,
-            dropout=dropout
+            dropout=(dropout
+                     if (num_layers > 1)
+                     else 0.)
         )
 
     def forward(self,
