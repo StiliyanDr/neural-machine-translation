@@ -105,16 +105,18 @@ class NMTModel(torch.nn.Module):
         self.__index_to_word = utils.flip(target_words)
         self.__meta_tokens = copy.deepcopy(meta_tokens)
 
-    def forward(self, source, target):
+    def forward(self, source, target, source_is_sorted=False):
         """
         :param source: a sequence of sentences - each sentence being
         a sequence of tokens/words (strs); the sentences being
-        translated. These sentences are assumed to be sorted by length
-        in decreasing order.
+        translated.
         :param target: a sequence of sentences - each sentence being
         a sequence of tokens/words (strs) which starts and ends with
         the start and end meta tokens, respectively; the translation
         sentences.
+        :param source_is_sorted: a boolean value indicating whether the
+        source sentences are sorted by length in decreasing order.
+        Defaults to `False`.
         :returns: a float - the cross-entropy loss computed on the
         batch of sentences.
 
@@ -122,8 +124,10 @@ class NMTModel(torch.nn.Module):
         each sentence in `target` corresponds to a sentence in `source`.
         """
         assert len(source) == len(target)
-        source_contexts, final_encoder_context = \
-            self.__encoder(source, sentences_are_sorted=True)
+        source_contexts, final_encoder_context = self.__encoder(
+            source,
+            sentences_are_sorted=source_is_sorted
+        )
         target_contexts, _ = self.__decode(
             sentences=[s[:-1] for s in target],
             final_encoder_context=final_encoder_context

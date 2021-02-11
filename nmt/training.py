@@ -121,7 +121,9 @@ class ModelTrainer:
                         train_samples
                     )
                 target_words += sum(len(s) - 1 for s in target_batch)
-                H = model(source_batch, target_batch)
+                H = model(source_batch,
+                          target_batch,
+                          source_is_sorted=True)
                 optimizer.zero_grad()
                 H.backward()
                 torch.nn.utils.clip_grad_norm_(
