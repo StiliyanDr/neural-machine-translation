@@ -49,3 +49,26 @@ def device_of(model):
     return (param.device
             if (param is not None)
             else None)
+
+
+def softmax(v):
+    """
+    Computes the softmax function along dimension 0 in a torch.tensor.
+    """
+    exps = torch.exp(v)
+
+    return exps / torch.sum(exps, dim=0).unsqueeze(0)
+
+
+def flip(dictionary):
+    """
+    Flips a dictionary with unique values.
+
+    :param dictionary: a mapping that is assumed to have unique values.
+    :returns: a dict whose keys are the mapping's values and whose
+    values are the mapping's keys.
+    """
+    return {
+        value: key
+        for key, value in dictionary.items()
+    }

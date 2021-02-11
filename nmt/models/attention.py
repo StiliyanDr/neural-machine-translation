@@ -1,5 +1,7 @@
 import torch
 
+from nmt.models import utils
+
 
 class Attention(torch.nn.Module):
     """
@@ -91,9 +93,7 @@ class Attention(torch.nn.Module):
         The input and output shape is:
         (max_source_len, max_target_len, batch_size)
         """
-        exp_scores = torch.exp(attention_scores)
-
-        return exp_scores / torch.sum(exp_scores, dim=0).unsqueeze(0)
+        return utils.softmax(attention_scores)
 
     def __attention_scores(self, source, target):
         """
