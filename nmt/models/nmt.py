@@ -14,9 +14,9 @@ class NMTModel(torch.nn.Module):
     Some of the architecture's specifics are:
      - source sentences are fed into the encoder which returns the
        different context vectors for each sentence
-     - target sentences (and optionally the final state of the encoder)
-       are fed into the decoder which returns the different context
-       vectors for each sentence
+     - target sentences (and optionally the transformed final state of
+       the encoder) are fed into the decoder which returns the different
+       context vectors for each sentence
      - source and target context vectors are fed into the attention
        module which returns the attention vector for each target
        context vector
@@ -50,10 +50,7 @@ class NMTModel(torch.nn.Module):
         the dictionary.
         :param do_initial_binding: a boolean value indicating whether
         the final state of the encoder should be fed into the decoder.
-        Defaults to `True`. Note that this is only possible if the
-        encoder and decoder's hidden sizes are the same; if the encoder
-        is bidirectional, the final states in both directions are
-        combined with sum.
+        Defaults to `True`.
         :param preprojection_nonlinearity: a unary function taking and
         returning a float. The model can be configured to apply a linear
         transformation on the final contexts, followed by a nonlinear
@@ -91,14 +88,12 @@ class NMTModel(torch.nn.Module):
                                      do_initial_binding,
                                      encoder,
                                      decoder):
-        if (do_initial_binding and
-            encoder.hidden_size != decoder.hidden_size):
-            raise ValueError(
-                "Initial binding is impossible with "
-                "differing encoder and decoder hidden sizes!"
-            )
-
-        self.__do_initial_binding = do_initial_binding
+        self.__initial_binding_transformation = (
+            torch.nn.Linear(encoder.context_size,
+                            decoder.hidden_size)
+            if (do_initial_binding)
+            else None
+        )
 
     def __set_words(self, target_words, meta_tokens):
         self.__target_words = copy.deepcopy(target_words)
@@ -158,9 +153,9 @@ class NMTModel(torch.nn.Module):
     def __initial_decoder_context(self, final_encoder_context):
         initial_context = None
 
-        if (self.__do_initial_binding):
+        if (self.__do_initial_binding()):
             h_n, c_n = (
-                self.__reshaped_for_decoder(
+                self.__transformed_for_decoder(
                     self.__final_context_in(c)
                 )
                 for c in final_encoder_context
@@ -169,20 +164,27 @@ class NMTModel(torch.nn.Module):
 
         return initial_context
 
-    def __reshaped_for_decoder(self, final_contexts):
+    def __do_initial_binding(self):
+        return self.__initial_binding_transformation is not None
+
+    def __transformed_for_decoder(self, final_contexts):
         """
         Non-public utility method.
 
         Given the final (state/cell) context vector for each sentence on
-        the last RNN layer, this function repeats the vector for each
-        layer in the decoder so that it can be fed into the decoder as
-        initial context vector on each layer.
+        the last RNN layer, this function transforms the vector and
+        repeats the resulting vector for each layer in the decoder so
+        that it can be fed into the decoder as initial context vector on
+        each layer.
 
         Thus, the shape changes from:
-        (batch_size, hidden_size)
+        (batch_size, encoder_context_size)
         to:
-        (num_layers, batch_size, hidden_size)
+        (num_layers, batch_size, decoder_hidden_size)
         """
+        final_contexts = self.__initial_binding_transformation(
+            final_contexts
+        )
         num_layers = self.__decoder.num_layers
 
         return final_contexts.unsqueeze(0).repeat(num_layers, 1, 1)
@@ -195,12 +197,12 @@ class NMTModel(torch.nn.Module):
         sentence on each RNN layer and in each direction, this
         method returns the final (state/cell) context vector for each
         sentence on the last RNN layer. If the layers are bidirectional,
-        the vectors in both directions are summed element wise.
+        the vectors in both directions are concatenated.
 
         Thus, the shape changes from:
         (num_layers * num_directions, batch_size, hidden_size)
         to:
-        (batch_size, hidden_size)
+        (batch_size, encoder_context_size)
         """
         num_layers = self.__encoder.num_layers
         _, batch_size, hidden_size = contexts.shape
@@ -209,7 +211,9 @@ class NMTModel(torch.nn.Module):
         final_layer_contexts = contexts[-1, :, :, :]
 
         return (
-            final_layer_contexts[0, :, :] + final_layer_contexts[1, :, :]
+            torch.cat((final_layer_contexts[0, :, :],
+                       final_layer_contexts[1, :, :]),
+                      dim=1)
             if (self.__encoder.is_bidirectional)
             else final_layer_contexts[0, :, :]
         )
