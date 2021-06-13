@@ -26,12 +26,12 @@ The project consists of two main parts:
 ## Architecture
 
 From a very abstract point of view, the architecture of a model that can be built with **nmt** looks like this:  
-<img src="E:/repositories/neural-machine-translation/docs/architecture_top_level.png" alt="architecture" style="zoom:25%;" />  
+<img src="docs/architecture_top_level.png" />  
 
 ### Encoder and decoder  
 
 The encoder and decoder modules consist of an embedding which is followed by an RNN (LSTM) layer:  
-<img src="E:/repositories/neural-machine-translation/docs/sequence_encoder.png" style="zoom:25%;" />
+<img src="docs/sequence_encoder.png"/>
 
 Both modules can have multiple RNN layers, but only those of the encoder can be bidirectional. Currently, the only type of embedding is a plain one, but the encoder can be generalised so that it could use a character-level CNN embedding.  
 
